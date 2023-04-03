@@ -9,3 +9,5 @@ Remember download the submodule where is the template when cloning the repositor
 $ git submodule init
 $ git submodule update
 ```
+
+You can see the blog here: [GoScrapy-Blog](https://jackgris.github.io/goscrapy-blog)
