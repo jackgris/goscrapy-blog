@@ -2,6 +2,7 @@
 title: "Graceful Shutdown"
 date: 2023-04-03T18:58:13-03:00
 draft: false
+tags: ["server", "shutdown", "channel", "signal", "sync", "golang"]
 ---
 
 ## How to implement a graceful shutdown in Go?
