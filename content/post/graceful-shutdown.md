@@ -23,7 +23,6 @@ Those means blocking the main go routine without waiting on anything or `Calling
 
 The most important task to make these is first know how to wait until all goroutines end and how to propagate the termination signal to all of them.
 
-&nbsp;
 
 ### Wait to finish.
 
@@ -206,9 +205,9 @@ func main() {
 
 #### Channel sharing issue
 
-Let's examine how context properties could help in a more complex situation. Having multiple loops running in parallel, using channels (counter-example):
+Let's examine how context properties could help in a more complex situation. Having multiple loops running in parallel, using channels:
 
-Example: (Warning!, don't use this code)
+Example: (`Warning!, don't use this code`)
 ```go
 func main() {
 	exit := make(chan os.Signal, 1)
@@ -514,6 +513,7 @@ go func() {
 ```
 
 If you have multiple workers writing to the same channel, close the channel after waiting for all workers to finish.
+
 Example:
 
 ```go
@@ -529,6 +529,7 @@ close(ch) // and then close the channel
 ```
 
 If you're reading from a channel, exit only when the channel has no more data. Essentially it's the responsibility of the writer to stop the readers, by closing the channel.
+
 Example:
 
 ```go
@@ -719,3 +720,5 @@ func main() {
 ### Closing this post
 
 Terminating your long-running services gracefully is an important pattern that you will have to implement sooner or later. This is especially true for systems that act as middlewares where many connections to external services exist and high volumes of data are handled concurrently. Go offers all the tools we need to implement this pattern, and selecting the right ones depends a lot on your use case. I hope this will helpful to anyone who want to implement it.
+
+This post is highly inspired by [this](https://www.rudderstack.com/blog/implementing-graceful-shutdown-in-go/). I hope you also enjoy it.
