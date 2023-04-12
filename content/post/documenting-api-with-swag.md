@@ -1,8 +1,8 @@
 ---
 title: "Documenting Api With Swag"
-date: 2023-04-09T19:23:48-03:00
-draft: true
-tags: ["api", "swagger", "documentation", "curl", "golang"]
+date: 2023-04-11T19:23:48-03:00
+draft: false
+tags: ["api", "swagger", "documentation", "curl", "golang", "openapi"]
 ---
 
 Think on this, you’ve finished developing a new API, and now have to write documentation to guide you when building client-side applications that consume the API. You start thinking of various ways to achieve this, and you lay out multiple alternatives like Swagger, Docusaurus, Postman and many more.
@@ -15,7 +15,7 @@ One great tool for creating API documentation is Swagger because of its ease of 
 - Allowing you to create, maintain, and publish API documentation quickly and easily.
 - Generating interactive documentation that allows you to validate and test API endpoints from your browser without third-party software.
 - Easily understandable by developers and non-developers
-- Functionality to generate API client libraries (SDKs) for various languages and frameworks directly from an OpenAPI specification.
+- Functionality to generate API client libraries (SDKs) for various languages and frameworks directly from an OpenAPI specification. (this last point is very important)
 
 Here you will learn how to create Swagger documentation for Go web APIs directly from the source code using annotations and Swag. In this article, we will build a demo web API with Go and Fiber, then create documentation for it using Swag.
 
@@ -27,7 +27,7 @@ Now let’s build the web API for a basic “to do” application.
 
 ##### Step 1: Set up your development environment
 
-Create a new Go project in your text editor or IDE and initialize your go.mod file. You are free to use any name for your package:
+Create a new Go project in your text editor or IDE and initialize your `go.mod` file. You are free to use any name for your package:
 
 ```bash
 go mod init go-api-with-swarg
@@ -62,7 +62,7 @@ func main() {
 ```
 ##### Step 4: Create the getAllTodos route
 
-Let’s create a todo type and seed the list with some data. Add the following code to the main.go file:
+Let’s create a todo type and seed the list with some data. Add the following code to the `main.go` file:
 ```go
 // todo represents data about a task in the todo list
 type todo struct {
@@ -93,7 +93,7 @@ func getAllTodos(c *fiber.Ctx) error {
 }
 ```
 
-Register the getAllTodos handler to the Fiber router. Update the main function in main.go with the following code:
+Register the getAllTodos handler to the Fiber router. Update the main function in `main.go` with the following code:
 
 ```go
 package main
@@ -114,7 +114,7 @@ func main() {
 }
 ```
 
-Test the getAllTodos route by running the Fiber server and making a request via curl like so:
+Test the getAllTodos route by running the Fiber server and making a request via `curl` like so:
 
 ```bash
 go run main.go
@@ -129,7 +129,7 @@ curl -X 'GET' \
 
 Create a route handler that will accept a GET request from the client and a todo ID, then return the details of the associated item from the todo list.
 
-Add the following code to the main.go file:
+Add the following code to the `main.go` file:
 ```go
 func getTodoByID(c *fiber.Ctx) error {
 	ID := c.Params("id")
@@ -149,19 +149,24 @@ func getTodoByID(c *fiber.Ctx) error {
 }
 ```
 
-Register the getTodoById handler to the Fiber router. Add the following code to the router configuration in main.go:
+Register the getTodoById handler to the Fiber router. Add the following code to the router configuration in `main.go`:
 
 ```go
 app.Get("/todo/:id", getTodoByID)
 ```
 
-Test the getTodoById route by making a request via Postman like so:
+Test the getTodoById route by making a request via `curl` like so:
+```bash
+curl -X 'GET' \
+  'http://localhost:3000/todo/2' \
+  -H 'accept: application/json'
+```
 
 ##### Step 6: Create the createTodo route
 
 Create a route handler that will accept a POST request from the client with a todo ID and task, then add a new item to the todo list.
 
-Add the following code to the main.go file:
+Add the following code to the `main.go` file:
 
 ```go
 func createTodo(c *fiber.Ctx) error {
@@ -186,7 +191,7 @@ Register the createTodo handler to the Fiber router. Add the following code to t
 app.Get("/todo", getAllTodos)
 ```
 
-Test the createTodo route by making a request via curl like so:
+Test the createTodo route by making a request via `curl` like so:
 ```bash
 curl -X 'GET' \
   'http://localhost:3000/todo' \
@@ -256,7 +261,7 @@ If your terminal does not recognize `swag init` when executed, you need to add t
 
 #### Step 3: Import the Swag package into your project
 
-Update the imports in the main.go file with the code below:
+Update the imports in the `main.go` file with the code below:
 
 ```go
 import (
@@ -297,7 +302,7 @@ Swag also lets you define your General API annotations in another file. You can 
 
 API operation annotations contain how the controller works (description, router, request type, parameters, and response codes). Let’s see how to add annotations for the getAllTodos route.
 
-Add the following annotations right before the getAllTodos function in the main.go file:
+Add the following annotations right before the getAllTodos function in the `main.go` file:
 
 ```go
 //	@Summary	get all items in the todo list
@@ -365,7 +370,7 @@ To generate the documentation from your code, run `swag init` again in the termi
 
 We have to run `swag init` each time we update the annotations in the code, so the documentation is regenerated and updated accordingly. And also you can run `swag fmt` if you want to format your swagger comments.
 
-We also have to register a route handler to the Fiber router responsible for rendering the Swagger documentation created by Swag. Add the following code to the router configuration in main.go:
+We also have to register a route handler to the Fiber router responsible for rendering the Swagger documentation created by Swag. Add the following code to the router configuration in `main.go`:
 
 ```go
 app.Get("/swagger/*", swagger.HandlerDefault)
