@@ -113,7 +113,7 @@ Our first step (as you’ll know from the Introduction to gRPC) is to define the
 
 To define a service, you specify a named service in your .proto file:
 ```protobuf
-service RouteGuide {
+service PersonGuide {
    ...
 }
 ```
@@ -121,41 +121,62 @@ service RouteGuide {
 
 A simple RPC where the client sends a request to the server using the stub and waits for a response to come back, just like a normal function call.
 ```protobuf
-// Obtains the feature at a given position.
-rpc GetFeature(Point) returns (Feature) {}
+// Obtains the PhoneNumber from the given Person.
+rpc GetPhone(Person) returns (PhoneNumber) {}
 ```
 
 A server-side streaming RPC where the client sends a request to the server and gets a stream to read a sequence of messages back. The client reads from the returned stream until there are no more messages. As you can see in our example, you specify a server-side streaming method by placing the stream keyword before the response type.
 ```protobuf
-    // Obtains the Features available within the given Rectangle.  Results are
-    // streamed rather than returned at once (e.g. in a response message with a
-    // repeated field), as the rectangle may cover a large area and contain a
-    // huge number of features.
-    rpc ListFeatures(Rectangle) returns (stream Feature) {}
+  // Obtains the Persons related to the adress.  Results are
+  // streamed rather than returned at once (e.g. in a response message with a
+  // repeated field).
+  rpc ListPersons(Adress) returns (stream Person) {}
 ```
 
 A client-side streaming RPC where the client writes a sequence of messages and sends them to the server, again using a provided stream. Once the client has finished writing the messages, it waits for the server to read them all and return its response. You specify a client-side streaming method by placing the stream keyword before the request type.
 ```protobuf
-    // Accepts a stream of Points on a route being traversed, returning a
-    // RouteSummary when traversal is completed.
-    rpc RecordRoute(stream Point) returns (RouteSummary) {}
+  // Accepts a stream of Persons on a route being traversed, returning a
+  // AddressBook when traversal is completed.
+  rpc RecordPersons(stream Person) returns (AddressBook) {}
 ```
 A bidirectional streaming RPC where both sides send a sequence of messages using a read-write stream. The two streams operate independently, so clients and servers can read and write in whatever order they like: for example, the server could wait to receive all the client messages before writing its responses, or it could alternately read a message then write a message, or some other combination of reads and writes. The order of messages in each stream is preserved. You specify this type of method by placing the stream keyword before both the request and the response.
 ```protobuf
-    // Accepts a stream of RouteNotes sent while a route is being traversed,
-    // while receiving other RouteNotes (e.g. from other users).
-    rpc RouteChat(stream RouteNote) returns (stream RouteNote) {}
+  // Accepts a stream of Person sent while a route is being traversed,
+  // while receiving Phone Numbers (e.g. from other users).
+  rpc RoutePhones(stream Person) returns (stream PhoneNumber) {}
 ```
 
 Our .proto file also contains protocol buffer message type definitions for all the request and response types used in our service methods - for example, here’s the Point message type:
 ```protobuf
-// Points are represented as latitude-longitude pairs in the E7 representation
-// (degrees multiplied by 10**7 and rounded to the nearest integer).
-// Latitudes should be in the range +/- 90 degrees and longitude should be in
-// the range +/- 180 degrees (inclusive).
-message Point {
-  int32 latitude = 1;
-  int32 longitude = 2;
+message Person {
+  string name = 1;
+  int32 id = 2;  // Unique ID number for this person.
+  string email = 3;
+
+  repeated PhoneNumber phones = 4;
+
+  google.protobuf.Timestamp last_updated = 5;
+}
+
+
+enum PhoneType {
+  MOBILE = 0;
+  HOME = 1;
+  WORK = 2;
+}
+
+message PhoneNumber {
+  string number = 1;
+  PhoneType type = 2;
+}
+
+// Our address book file is just one of these.
+message AddressBook {
+  repeated Person people = 1;
+}
+
+message Adress {
+  string name = 1;
 }
 ```
 
@@ -184,34 +205,35 @@ There are two parts to making our RouteGuide service do its job:
 
 You can find our example RouteGuide server in server/server.go. Let’s take a closer look at how it works.
 
-#### Implementing RouteGuide
+#### Implementing PersonGuideServer
 
-As you can see, our server has a routeGuideServer struct type that implements the generated RouteGuideServer interface:
+As you can see, our server has a routeGuideServer struct type that implements the generated `PersonGuideServer` interface:
 
 ```go
-type routeGuideServer struct {}
+type PersonGuideServer struct {}
 
-func (s *routeGuideServer) GetFeature(ctx context.Context, point *pb.Point) (*pb.Feature, error) {}
+func (s *PersonGuideServer) GetPhone(ctx context.Context, person *pb.Person) (*pb.PhoneNumber, error) {}
 
-func (s *routeGuideServer) ListFeatures(rect *pb.Rectangle, stream pb.RouteGuide_ListFeaturesServer) error {}
+func (s *PersonGuideServer) ListPersons(adress *pb.Adress, stream pb.PersonGuide_ListPersonsServer) error {}
 
-func (s *routeGuideServer) RecordRoute(stream pb.RouteGuide_RecordRouteServer) error {}
+func (s *PersonGuideServer) RecordPersons(stream pb.PersonGuide_RecordPersonsServer) error {}
 
-func (s *routeGuideServer) RouteChat(stream pb.RouteGuide_RouteChatServer) error {}
+func (s *PersonGuideServer) RoutePhones(stream pb.PersonGuide_RoutePhonesServer) error {}
 ```
+
 #### Simple RPC
 
 The routeGuideServer implements all our service methods. Let’s look at the simplest type first, GetFeature, which just gets a Point from the client and returns the corresponding feature information from its database in a Feature.
 
 ```go
-func (s *routeGuideServer) GetFeature(ctx context.Context, point *pb.Point) (*pb.Feature, error) {
-  for _, feature := range s.savedFeatures {
-    if proto.Equal(feature.Location, point) {
-      return feature, nil
-    }
-  }
-  // No feature was found, return an unnamed feature
-  return &pb.Feature{Location: point}, nil
+func (s *PersonGuideServer) GetPhone(ctx context.Context, person *pb.Person) (*pb.PhoneNumber, error) {
+	for _, p := range s.savedPersons {
+		if p.Id == person.Id {
+			return p.GetPhones()[0], nil
+		}
+	}
+	// No feature was found, return an unnamed feature
+	return &pb.PhoneNumber{}, errors.New("Not found person")
 }
 ```
 
@@ -222,15 +244,14 @@ The method is passed a context object for the RPC and the client’s Point proto
 Now let’s look at one of our streaming RPCs. ListFeatures is a server-side streaming RPC, so we need to send back multiple Features to our client.
 
 ```go
-func (s *routeGuideServer) ListFeatures(rect *pb.Rectangle, stream pb.RouteGuide_ListFeaturesServer) error {
-  for _, feature := range s.savedFeatures {
-    if inRange(feature.Location, rect) {
-      if err := stream.Send(feature); err != nil {
-        return err
-      }
-    }
-  }
-  return nil
+func (s *PersonGuideServer) ListPersons(adress *pb.Adress, stream pb.PersonGuide_ListPersonsServer) error {
+	fmt.Println("In list persons with adress: ", adress)
+	for _, person := range s.savedPersons {
+		if err := stream.Send(person); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 ```
 
@@ -243,35 +264,32 @@ In the method, we populate as many Feature objects as we need to return, writing
 Now let’s look at something a little more complicated: the client-side streaming method RecordRoute, where we get a stream of Points from the client and return a single RouteSummary with information about their trip. As you can see, this time the method doesn’t have a request parameter at all. Instead, it gets a RouteGuide_RecordRouteServer stream, which the server can use to both read and write messages - it can receive client messages using its Recv() method and return its single response using its SendAndClose() method.
 
 ```go
-func (s *routeGuideServer) RecordRoute(stream pb.RouteGuide_RecordRouteServer) error {
-  var pointCount, featureCount, distance int32
-  var lastPoint *pb.Point
-  startTime := time.Now()
-  for {
-    point, err := stream.Recv()
-    if err == io.EOF {
-      endTime := time.Now()
-      return stream.SendAndClose(&pb.RouteSummary{
-        PointCount:   pointCount,
-        FeatureCount: featureCount,
-        Distance:     distance,
-        ElapsedTime:  int32(endTime.Sub(startTime).Seconds()),
-      })
-    }
-    if err != nil {
-      return err
-    }
-    pointCount++
-    for _, feature := range s.savedFeatures {
-      if proto.Equal(feature.Location, point) {
-        featureCount++
-      }
-    }
-    if lastPoint != nil {
-      distance += calcDistance(lastPoint, point)
-    }
-    lastPoint = point
-  }
+func (s *PersonGuideServer) RecordPersons(stream pb.PersonGuide_RecordPersonsServer) error {
+	var lastPerson *pb.Person
+	for {
+		person, err := stream.Recv()
+		if err != nil && person != nil {
+			ts := timestamppb.New(time.Now())
+			lastPerson = person
+			lastPerson.LastUpdated = ts
+			s.savedPersons = append(s.savedPersons, lastPerson)
+		}
+		if err == io.EOF {
+			// Don't do this in production this is only for example propose
+			p := pb.Person{
+				Name:   "Another part in the world",
+				Id:     11,
+				Email:  "anotherpartintheworld@gmail.com",
+				Phones: phones,
+			}
+
+			s.addressbook["book"][0].People = append(s.addressbook["book"][0].People, &p)
+			return stream.SendAndClose(s.addressbook["book"][0])
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 ```
 In the method body we use the RouteGuide_RecordRouteServer’s Recv() method to repeatedly read in our client’s requests to a request object (in this case a Point) until there are no more messages: the server needs to check the error returned from Recv() after each call. If this is nil, the stream is still good and it can continue reading; if it’s io.EOF the message stream has ended and the server can return its RouteSummary. If it has any other value, we return the error “as is” so that it’ll be translated to an RPC status by the gRPC layer.
@@ -281,23 +299,29 @@ In the method body we use the RouteGuide_RecordRouteServer’s Recv() method to 
 Finally, let’s look at our bidirectional streaming RPC RouteChat().
 
 ```go
-func (s *routeGuideServer) RouteChat(stream pb.RouteGuide_RouteChatServer) error {
-  for {
-    in, err := stream.Recv()
-    if err == io.EOF {
-      return nil
-    }
-    if err != nil {
-      return err
-    }
-    key := serialize(in.Location)
-                ... // look for notes to be sent to client
-    for _, note := range s.routeNotes[key] {
-      if err := stream.Send(note); err != nil {
-        return err
-      }
-    }
-  }
+func (s *PersonGuideServer) RoutePhones(stream pb.PersonGuide_RoutePhonesServer) error {
+	for {
+		person, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		// Note: this copy prevents blocking other clients while serving this one.
+		// We don't need to do a deep copy, because elements in the slice are
+		// insert-only and never modified.
+		rn := make([]*pb.PhoneNumber, len(person.Phones))
+		copy(rn, person.Phones)
+		s.mu.Unlock()
+
+		for _, phone := range rn {
+			if err := stream.Send(phone); err != nil {
+				return err
+			}
+		}
+	}
 }
 ```
 
@@ -316,11 +340,10 @@ if err != nil {
 var opts []grpc.ServerOption
 ...
 grpcServer := grpc.NewServer(opts...)
-pb.RegisterRouteGuideServer(grpcServer, newServer())
-grpcServer.Serve(lis)
+pb.RegisterPersonGuideServer(grpcServer, newServer())
 ```
 
-To build and start a server, we:
+#### To build and start a server, we:
 
 - Specify the port we want to use to listen for client requests using:
 ```go
@@ -330,13 +353,11 @@ lis, err := net.Listen(...).
 - Register our service implementation with the `gRPC server`.
 - Call `Serve()` on the server with our port details to do a blocking wait until the process is killed or `Stop()` is called.
 
-#### Creating the client
-
-In this section, we’ll look at creating a Go client for our RouteGuide service. You can see our complete example client code in grpc-go/examples/route_guide/client/client.go.
+### Creating the client
 
 #### Creating a stub
 
-To call service methods, we first need to create a gRPC channel to communicate with the server. We create this by passing the server address and port number to `grpc.Dial()` as follows:
+To call `PersonGuideClient` methods, we from the first need to create a gRPC channel to communicate with the server. We create this by passing the server address and port number to `grpc.Dial()` as follows:
 ```go
 var opts []grpc.DialOption
 ...
@@ -347,82 +368,80 @@ if err != nil {
 defer conn.Close()
 ```
 
-You can use `DialOptions` to set the auth credentials (for example, TLS, GCE credentials, or JWT credentials) in `grpc.Dial` when a service requires them. The `RouteGuide` service doesn’t require any credentials.
+You can use `DialOptions` to set the auth credentials (for example, TLS, GCE credentials, or JWT credentials) in `grpc.Dial` when a service requires them. The `PersonGuide` service doesn’t require any credentials.
 
-Once the `gRPC` channel is setup, we need a client stub to perform RPCs. We get it using the `NewRouteGuideClient` method provided by the pb package generated from the example `.proto` file.
+Once the `gRPC` channel is setup, we need a client stub to perform RPCs. We get it using the `NewPersonGuideClient` method provided by the pb package generated from the example `.proto` file.
 ```go
-client := pb.NewRouteGuideClient(conn)
+client := pb.NewPersonGuideClient(conn)
 ```
 
 #### Calling service methods
 
-Now let’s look at how we call our service methods. Note that in gRPC-Go, RPCs operate in a blocking/synchronous mode, which means that the RPC call waits for the server to respond, and will either return a response or an error.
+Now let’s look at how we call our service methods. Note that in `gRPC-Go`, RPCs operate in a `blocking/synchronous` mode, which means that the RPC call waits for the server to respond, and will either return a response or an error.
 
 #### Simple RPC
 
-Calling the simple RPC GetFeature is nearly as straightforward as calling a local method.
+Calling the simple RPC GetPhone is nearly as straightforward as calling a local method.
 ```go
-feature, err := client.GetFeature(context.Background(), &pb.Point{409146138, -746188906})
+phone, err := client.GetPhone(ctx, person)
 if err != nil {
   ...
 }
 ```
 As you can see, we call the method on the stub we got earlier. In our method parameters we create and populate a request protocol buffer object (in our case Point). We also pass a context.Context object which lets us change our RPC’s behavior if necessary, such as time-out/cancel an RPC in flight. If the call doesn’t return an error, then we can read the response information from the server from the first return value.
 ```go
-log.Println(feature)
+log.Println(phone)
 ```
 
 #### Server-side streaming RPC
 
 Here’s where we call the server-side streaming method `ListFeatures`, which returns a stream of geographical Features. If you’ve already read Creating the server some of this may look very familiar - streaming RPCs are implemented in a similar way on both sides.
+
 ```go
-rect := &pb.Rectangle{ ... }  // initialize a pb.Rectangle
-stream, err := client.ListFeatures(context.Background(), rect)
+stream, err := client.ListPersons(ctx, adress)
 if err != nil {
-  ...
+	log.Fatalf("client.ListPersons failed: %v", err)
 }
 for {
-    feature, err := stream.Recv()
-    if err == io.EOF {
-        break
-    }
-    if err != nil {
-        log.Fatalf("%v.ListFeatures(_) = _, %v", client, err)
-    }
-    log.Println(feature)
+	person, err := stream.Recv()
+	if err == io.EOF {
+		break
+	}
+	if err != nil {
+		log.Fatalf("client.ListPersons failed: %v", err)
+	}
+	log.Printf("Person: name: %s, email:%s, Id: %d\n", person.GetName(),
+		person.GetEmail(), person.GetId())
 }
 ```
 
+
 As in the simple RPC, we pass the method a context and a request. However, instead of getting a response object back, we get back an instance of `RouteGuide_ListFeaturesClient`. The client can use the `RouteGuide_ListFeaturesClient` stream to read the server’s responses.
 
-We use the `RouteGuide_ListFeaturesClient’s Recv()` method to repeatedly read in the server’s responses to a response protocol buffer object (in this case a Feature) until there are no more messages: the client needs to check the error err returned from `Recv()` after each call. If nil, the stream is still good and it can continue reading; if it’s io.EOF then the message stream has ended; otherwise there must be an RPC error, which is passed over through err.
+We use the `RouteGuide_ListFeaturesClient’s Recv()` method to repeatedly read in the server’s responses to a response protocol buffer object (in this case a Feature) until there are no more messages: the client needs to check the error err returned from `Recv()` after each call. If nil, the stream is still good and it can continue reading; if it’s io.EOF then the message stream has ended; otherwise there must be an RPC error, which is passed over through `PersonGuideServer`.
 
 #### Client-side streaming RPC
 
-The client-side streaming method `RecordRoute` is similar to the server-side method, except that we only pass the method a context and get a `RouteGuide_RecordRouteClient` stream back, which we can use to both write and read messages.
+
+The client-`PersonGuideServer`side streaming method `RecordRoute` is similar to the server-side method, except that we only pass the method a context and get a `RouteGuide_RecordRouteClient` stream back, which we can use to both write and read messages.
 ```go
-// Create a random number of random points
-r := rand.New(rand.NewSource(time.Now().UnixNano()))
-pointCount := int(r.Int31n(100)) + 2 // Traverse at least two points
-var points []*pb.Point
-for i := 0; i < pointCount; i++ {
-  points = append(points, randomPoint(r))
-}
-log.Printf("Traversing %d points.", len(points))
-stream, err := client.RecordRoute(context.Background())
+log.Printf("Traversing %d persons.", len(persons))
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+stream, err := client.RecordPersons(ctx)
 if err != nil {
-  log.Fatalf("%v.RecordRoute(_) = _, %v", client, err)
+	log.Fatalf("client.RecordPersons failed: %v", err)
 }
-for _, point := range points {
-  if err := stream.Send(point); err != nil {
-    log.Fatalf("%v.Send(%v) = %v", stream, point, err)
-  }
+for p := range persons {
+	if err := stream.Send(&persons[p]); err != nil {
+		log.Fatalf("client.RecordPersons: stream.Send(%v) failed: %v", &persons[p], err)
+	}
 }
 reply, err := stream.CloseAndRecv()
 if err != nil {
-  log.Fatalf("%v.CloseAndRecv() got error %v, want %v", stream, err, nil)
+	log.Fatalf("client.RecordPersons failed: %v", err)
 }
-log.Printf("Route summary: %v", reply)
+log.Printf("AdressBook summary: %v", reply)
 ```
 
 The `RouteGuide_RecordRouteClient` has a `Send()` method that we can use to send requests to the server. Once we’ve finished writing our client’s requests to the stream using `Send()`, we need to call `CloseAndRecv()` on the stream to let gRPC know that we’ve finished writing and are expecting to receive a response. We get our RPC status from the err returned from `CloseAndRecv()`. If the status is nil, then the first return value from CloseAndRecv() will be a valid server response.
@@ -431,28 +450,34 @@ The `RouteGuide_RecordRouteClient` has a `Send()` method that we can use to send
 
 Finally, let’s look at our bidirectional streaming `RPC RouteChat()`. As in the case of `RecordRoute`, we only pass the method a context object and get back a stream that we can use to both write and read messages. However, this time we return values via our method’s stream while the server is still writing messages to their message stream.
 ```go
-stream, err := client.RouteChat(context.Background())
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+stream, err := client.RoutePhones(ctx)
+if err != nil {
+	log.Fatalf("client.RoutePhones failed: %v", err)
+}
 waitc := make(chan struct{})
 go func() {
-  for {
-    in, err := stream.Recv()
-    if err == io.EOF {
-      // read done.
-      close(waitc)
-      return
-    }
-    if err != nil {
-      log.Fatalf("Failed to receive a note : %v", err)
-    }
-    log.Printf("Got message %s at point(%d, %d)", in.Message, in.Location.Latitude, in.Location.Longitude)
-  }
+	for {
+		phone, err := stream.Recv()
+		if err == io.EOF {
+			// read done.
+			close(waitc)
+			return
+		}
+		if err != nil {
+			log.Fatalf("client.RoutePhones failed: %v", err)
+		}
+		log.Printf("Got phone %s type %v", phone.Number, phone.Type)
+	}
 }()
-for _, note := range notes {
-  if err := stream.Send(note); err != nil {
-    log.Fatalf("Failed to send a note: %v", err)
-  }
+for p := range persons {
+	if err := stream.Send(&persons[p]); err != nil {
+		log.Fatalf("client.RoutePhones: stream.Send(%v) failed: %v", &persons[p], err)
+	}
 }
-stream.CloseSend()
+// For now we don't check errors, don't do this in production
+_ = stream.CloseSend()
 <-waitc
 ```
 
@@ -472,22 +497,79 @@ Execute the following commands on the project directory:
     $ go run client/client.go
 ```
 
+&nbsp;
+
 You’ll see output like this:
 
-//TODO
+```
+2023/04/20 19:37:45 Traversing 6 persons.
+2023/04/20 19:37:45 AdressBook summary: people:{name:"Juan"  id:1  email:"juan@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Gabriel"  id:2  email:"gabriel@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Albert"  id:3  email:"albert@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Mark"  id:4  email:"mark@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Brian"  id:5  email:"brian@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Kevin"  id:6  email:"kevin@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Ryan"  id:7  email:"ryan@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"May"  id:8  email:"may@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321" pPhoneNumber type:WORK}  phones from the:{number:"4312Person"}}  people:{name:"Rosario"  id:9  email:"rosario@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Argentina"  id:10  email:"argentina@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}  people:{name:"Another part in the world"  id:11  email:"anotherpartintheworld@gmail.com"  phones:{number:"1234"  type:HOME}  phones:{number:"4321"  type:WORK}  phones:{number:"4312"}}
+
+2023/04/20 19:37:45 Got phone 1234 type HOME
+2023/04/20 19:37:45 Got phone 4321 type WORK
+2023/04/20 19:37:45 Got phone 4312 type MOBILE
+2023/04/20 19:37:45 Got phone 1234 type HOME
+2023/04/20 19:37:45 Got phone 4321 type WORK
+2023/04/20 19:37:45 Got phone 4312 type MOBILE
+2023/04/20 19:37:45 Got phone 1234 typ```e HOME
+2023/04/20 19:37:45 Got phone 4321 type WORK
+2023/04/20 19:37:45 Got phone 4312 type MOBILE
+2023/04/20 19:37:45 Got phone 1234 type HOME
+2023/04/20 19:37:45 Got phone 4321 type WORK
+2023/04/20 19:37:45 Got phone 1234 type HOME
+2023/04/20 19:37:45 Got phone 4321 type WORK
+
+2023/04/20 19:37:45 Got phone 4312 type MOBILE
+2023/04/20 19:37:45 Got phone 1234 type HOME
+2023/04/20 19:37:45 Got phone 4321 type WORK
+2023/04/20 19:37:45 Got phone 4312 type MOBILE
+2023/04/20 19:37:45 Getting phone from person Juan
+2023/04/20 19:37:45 number:"1234"  type:HOME
+
+2023/04/20 19:37:45 Getting phone from person Gabriel
+2023/04/20 19:37:45 number:"1234"  type:HOME
+
+023/04/20 19:37:45 Got phone 4312 type MOB
+2023/04/20 19:37:45 Getting from the phone fromPerson person Albert
+
+2023/04/20 19:37:45 number:"1234"  type:HOME
+2023/04/20 19:37:45 Getting phone from person Mark
+2023/04/20 19:37:45 number:"1234"  type:HOME
+2023/04/20 19:37:45 Getting phone from person Brian
+2023/04/20 19:37:45 number:"1234"  type:HOME
+
+2023/04/20 19:37:45 Getting phone from person Kevin
+2023/04/20 19:37:45 number:"1234"  type:HOME
+2023/04/20 19:37:45 Looking for persons in adress my adress
+2023/04/20 19:37:45 Person: name: Juan, email:juan@gmail.com, Id: 1
+2023/04/20 19:37:45 Person: name: Gabriel, email:gabriel@gmail.com, Id: 2
+2023/04/20 19:37:45 Person: name: Albert, email:albert@gmail.com, Id: 3
+2023/04/20 19:37:45 Person: name: Mark, email:mark@gmail.com, Id: 4
+2023/04/20 19:37:45 Got phone 4312 type MOB
+2023/04/20 19:37:45 Person: name: Brian, email:brian@gmail.com, Id: 5
+2023/04/20 19:37:45 Person: name: Kevin, email:kevin@gmail.com, Id: 6
+023/04/20 19:37:45 Got phone 4312 type MOB
+2023/04/20 19:37:45 Person: name: Ryan, email:ryan@gmail.com, Id: 7
+2023/04/20 19:37:45 Person: name: May, email:may@gmail.com, Id: 8
+2023/04/20 19:37:45 Person: name: Rosario, email:rosario@gmail.com, Id: 9
+2023/04/20 19:37:45 Person: name: Argentina, email:argentina@gmail.com, Id: 10
+023/04/20 19:37:45 Got phone 4312 type MOB
+```
+&nbsp;
+You can see all the code in this [repository](https://github.com/jackgris/go-grpc-communication)
 
 ### Conclusion
 
-gRPC is a faster, smarter option for service-to-service communication and client-server mobile applications. As you saw in this tutorial, gRPC and Golang make a good combination for microservice communication. What you need to do is change your perspective from creating resource-based APIs to creating action-based APIs.
+goRPC is a faster, smarter option for service-to-service communication and client-server mobile applications. As you saw in this tutorial, gRPC and Golang make a good combination for microservice communication. What you need to do is change your perspective from creating resource-based APIs to creating action-based APIs.
 
-#### I highly recommend reading these articles.
+&nbsp;
 
-[gRPC](https://grpc.io/)
+#### I highly recommend reading these the articles.
 
-[Protocol Buffer](https://protobuf.dev/)
+[gRPCPerson](https://grpc.io/)
 
 [gRPC Motivation and Design Principles](https://grpc.io/blog/principles/)
 
 [Stubbing gRPC in Go](https://jadekler.github.io/2020/10/08/stubbing-grpc.html)
 
-[Talking to Go gRPC Services Via HTTP/1](https://www.youtube.com/watch?v=Vbw8h0RCn2E)
+[Talking to Go gRPC Services Via HTTP](https://www.youtube.com/watch?v=Vbw8h0RCn2E)
