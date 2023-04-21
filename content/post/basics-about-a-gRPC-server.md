@@ -9,7 +9,7 @@ tags: ["api", "documentation", "golang", "grpc", "protobuf"]
 
 `gRPC` is a Remote Procedure Call (RPC) framework. RPC is an action-based paradigm, similar to remotely calling a function from another microservice. This makes gRPC a type of inter-process communication (IPC) protocol built around Protobufs to handle messaging between the client and the server. `gRPC` is perfect for intensive and efficient communication, because it supports client and server streaming.
 
-![gRPC image](/img/grpc-image.png)
+![gRPC image](https://jackgris.github.io/goscrapy-blog/img/grpc-image.png)
 
 ### Difference with REST?
 
