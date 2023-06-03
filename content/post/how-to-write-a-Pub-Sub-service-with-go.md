@@ -2,7 +2,7 @@
 title: "How to Write a Pub Sub Service With Go"
 date: 2023-05-26T12:14:36-03:00
 draft: true
-tags: ["pubsub", "golang"]
+tags: ["pubsub", "golang", "redis", "nats", "fiber", "channels"]
 ---
 
 ![pubsub_gopher logo](https://jackgris.github.io/goscrapy-blog/img/gopher-sending-a-message.png)
@@ -15,6 +15,8 @@ tags: ["pubsub", "golang"]
 The Pub/Sub (publish/subscribe) pattern is a messaging pattern used in distributed systems to enable asynchronous communication between components or systems. It allows for the decoupling of senders (publishers) and receivers (subscribers) by introducing an intermediary called a message broker or message bus.
 
 ### How it's work?
+
+![pubsub_flow](https://jackgris.github.io/goscrapy-blog/img/pubsub-flow.svg)
 
 Here's an overview:
 
@@ -119,35 +121,325 @@ func main() {
 
 In this example, we first define a channel called messageChannel. We then create a publisher goroutine that publishes 10 messages to the channel and closes the channel. We also create three subscriber goroutines that receive messages from the channel. Finally, we start the publisher and subscriber goroutines in the main() function and wait for all the subscribers to finish receiving messages using the Wait function of our WaitGroup.
 
-This is just a basic example of how to implement Pub/Sub in Go using channels and goroutines. There are many other ways to implement Pub/Sub using different libraries and frameworks, such as Redis Pub/Sub or NATS.
+This is just a basic example of how to implement Pub/Sub in Go using channels and goroutines. There are many other ways to implement Pub/Sub using different libraries and frameworks, such as Redis Pub/Sub or NATS. We will talk about that below.
 
-## Best practices for implementing Pub/Sub in distributed systems, such as using locks to ensure thread safety and mapping topics to channels
+## Here one example near to a real applications
 
+In this case I create an interface and his implementation, you well see that I create a map where hold the topic and a list of channels. Every user that subscribe to one topic, will receive a channel. So when someone write something in one topic, our implementation will re-send the same message to all the channel related to that topic.
+
+```go
+// PubSub Interface: Start by defining an interface that represents the Pub/Sub functionality.
+// This interface should include methods for publishing messages to topics and subscribing to topics.
+type PubSub interface {
+	Publish(topic string, message interface{})
+	Subscribe(topic string) <-chan interface{}
+	Wait()
+}
+
+// PubSubImpl implement the PubSub interface. This struct will manage the topics, subscribers, and message distribution.
+type PubSubImpl struct {
+	waitGroup        sync.WaitGroup
+	topics           map[string][]chan interface{}
+	subscriptionLock sync.Mutex
+}
+
+// NewPubSub create a struct that implements the PubSub interface.
+func NewPubSub() *PubSubImpl {
+	return &PubSubImpl{
+		topics: make(map[string][]chan interface{}),
+	}
+}
+
+// Publish in the PubSubImpl struct, implement the Publish method to
+// publish messages to a specific topic. This method will iterate over the subscribers of the topic
+// and send the message through the corresponding channels.
+func (ps *PubSubImpl) Publish(topic string, message interface{}) {
+	ps.subscriptionLock.Lock()
+	defer ps.subscriptionLock.Unlock()
+
+	subscribers := ps.topics[topic]
+	for _, subscriber := range subscribers {
+		ps.waitGroup.Add(1)
+		go func(subscriber chan interface{}) {
+			msg := fmt.Sprintf("%s %v", topic, message)
+			subscriber <- msg
+			ps.waitGroup.Done()
+		}(subscriber)
+	}
+}
+
+// Subscribe in the PubSubImpl implement the Subscribe method to allow subscribers to subscribe to a topic.
+// It creates a new channel for the subscriber and adds it to the list of subscribers for the specified topic.
+func (ps *PubSubImpl) Subscribe(topic string) <-chan interface{} {
+	ps.subscriptionLock.Lock()
+	defer ps.subscriptionLock.Unlock()
+
+	subscriber := make(chan interface{})
+	ps.topics[topic] = append(ps.topics[topic], subscriber)
+
+	return subscriber
+}
+
+// Wait will wait until all messages are published
+func (ps *PubSubImpl) Wait() {
+	ps.waitGroup.Wait()
+}
+
+var pubsub PubSub
+
+// In this example, a message is published to "topic1", and the subscriber receives the message through the channel.
+// You can have multiple subscribers to the same topic, and each subscriber will receive the published message independently.
+// By leveraging channels and goroutines, you can achieve concurrent and asynchronous message distribution,
+// enabling the Pub/Sub pattern in your Go application.
+func main() {
+	// Use the Pub/Sub implementation in your application by creating a new instance of PubSubImpl,
+	// publishing messages, and subscribing to topics.
+	pubsub = NewPubSub()
+
+	// Subscribe to different topics
+	subscriber1 := pubsub.Subscribe("topic1")
+	subscriber2 := pubsub.Subscribe("topic2")
+	subscriber3 := pubsub.Subscribe("topic3")
+	subscriber4 := pubsub.Subscribe("topic3")
+	subscriber5 := pubsub.Subscribe("topic3")
+
+	// Publish a message to the topics
+	pubsub.Publish("topic1", "Hello, subscribers number one!")
+	pubsub.Publish("topic1", "Bye, subscribers number one!")
+	pubsub.Publish("topic2", "Hello, subscribers number two!")
+	pubsub.Publish("topic2", "How are you? subscribers number two!")
+	pubsub.Publish("topic2", "Bye, subscribers number two!")
+	pubsub.Publish("topic3", "Hello, subscribers number three!")
+	pubsub.Publish("topic3", "How are you? subscribers number three!")
+	pubsub.Publish("topic3", "Bye, subscribers number three!")
+
+	// Receive messages from different topics
+	go func() {
+		for {
+			select {
+			case message := <-subscriber1:
+				fmt.Println("subcriber 1", message)
+			case message := <-subscriber2:
+				fmt.Println("subcriber 2", message)
+			case message := <-subscriber3:
+				fmt.Println("subcriber 3", message)
+			case message := <-subscriber4:
+				fmt.Println("subcriber 4", message)
+			case message := <-subscriber5:
+				fmt.Println("subcriber 5", message)
+			}
+
+		}
+	}()
+
+	// Wait for all messages to be received by subscribers
+	pubsub.Wait()
+}
+```
 ## Use cases for Pub/Sub, such as chat applications and real-time notifications
 
-## Beyond Pub/Sub: additional features that can be added to Pub/Sub to provide more functionality, such as authentication and message retrieval
+Now I will show you an example using our Pub/Sub implementation to create a real-time chat room. This is a silly example, but I think is useful to understand in deep this concepts. For that purpose I create a simple fron-end, you can see the code and the instruction to run it here: [chat example code](https://github.com/jackgris/go-pubsub-example/tree/main/chat).
 
-## Sample code in Go demonstrating how to use Pub/Sub with Redis or Google Cloud Pub/Sub
+### First our Pub/Sub implementation
+
+The code is pretty similar to the code that we see before, but I made some modification, like create a new type for our messages:
+
+```go
+// Msg is the structure that will contain the necessary data for the chat.
+type Msg struct {
+	Id       string `json:"id"` // The ID in this example is necessary to identify the connection.
+	Username string `json:"username"`
+	Message  string `json:"message"`
+}
+
+// PubSub Interface: Start by defining an interface that represents the Pub/Sub functionality.
+// This interface should include methods for publishing messages to topics and subscribing to topics.
+type PubSub interface {
+	Publish(topic string, message Msg)
+	Subscribe(topic string) <-chan Msg
+}
+```
+### Our server
+
+And this is our server, this will receive all the messages from the chat application fron-end and will re-send all the messages to all the others users.
+
+```go
+// Create our server and configure the middleware that will help us to establish the WebSocket connection.
+	app := fiber.New()
+	app.Use("/ws", func(c *fiber.Ctx) error {
+		// IsWebSocketUpgrade returns true if the client
+		// requested upgrade to the WebSocket protocol.
+		if websocket.IsWebSocketUpgrade(c) {
+			c.Locals("allowed", true)
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+
+	// Initiate the Pub/Sub service created by us.
+	var pubsub PubSub = NewPubSub()
+	// In this case we only have one topic, one chat room.
+	subscribe := pubsub.Subscribe("chat")
+	// With this will save all the websocket connections that are active.
+	connections := make(map[string]*websocket.Conn)
+
+	app.Get("/ws/:id", websocket.New(func(c *websocket.Conn) {
+
+		// Create an Id to identify the connection.
+		id := uuid.New()
+		// Save the connection in our pool. And remove the connection when the websocket is close.
+		connections[id.String()] = c
+		defer delete(connections, id.String())
+
+		var (
+			mt  int
+			msg []byte
+			err error
+		)
+		for {
+			// We read everything we receive from the front-end.
+			if mt, msg, err = c.ReadMessage(); err != nil {
+				log.Println("read:", err)
+				break
+			}
+			log.Printf("recv: %s - mt: %d", msg, mt)
+
+			// We get the data from the message and publish that in our Pub/Sub service.
+			m := Msg{}
+			err := json.Unmarshal(msg, &m)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			m.Id = id.String() // add the Id to identify the owner
+			pubsub.Publish("chat", m)
+		}
+
+	}))
+
+	// Every time that receive a message, we will send the message to all the active connections.
+	// For that we need the channel for communication and all the connections.
+	go func(subs <-chan Msg, conn map[string]*websocket.Conn) {
+		for {
+			message := <-subs
+			m, err := json.Marshal(message)
+			if err != nil {
+				log.Println("Error while marshal our message: ", err)
+				continue
+			}
+
+			for _, c := range conn {
+				if err = c.WriteMessage(1, m); err != nil {
+					log.Printf("Error while write to ID: %s with err: %s\n", message.Id, err)
+				}
+			}
+		}
+	}(subscribe, connections)
+
+	log.Fatal(app.Listen(":8080"))
+```
+
+If you want to run the code, remember follow the instructions here: [Chat example code](https://github.com/jackgris/go-pubsub-example/tree/main/chat)
+
+Bellow you will see a couple of examples using Redis and Nats.
+
+## How to use Pub/Sub with Redis?
+
+This is basic example using Redis, the main idea is we have a server that receive POST request with a message and the server will shared all the messages with the clients that are connected.
+
+### Simple server code
+
+In our main function, the code that will receive and send the message to the clients:
+
+```go
+        rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+	ctx := context.Background()
+
+	// There is no error because go-redis automatically reconnects on error.
+	pubsub := rdb.Subscribe(ctx, "send-user-data")
+	// Close the subscription when we are done.
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+
+	app := fiber.New()
+
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("Hello there 👋")
+	})
+
+	app.Post("/", func(c *fiber.Ctx) error {
+		user := new(User)
+
+		if err := c.BodyParser(user); err != nil {
+			log.Println("Body Parse: ", err)
+			return err
+		}
+
+		payload, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+
+		if err := rdb.Publish(ctx, "send-user-data", payload).Err(); err != nil {
+			return err
+		}
+
+		return c.SendStatus(200)
+	})
+
+	go func(ch <-chan *redis.Message) {
+		for msg := range ch {
+			fmt.Println(msg.Channel, msg.Payload)
+		}
+	}(ch)
+
+	log.Println(app.Listen(":3000"))
+```
+
+### Client code
+
+This code in the client will receive all the messages from our server:
+
+```go
+        ctx := context.Background()
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	subscriber := redisClient.Subscribe(ctx, "send-user-data")
+
+	user := User{}
+
+	for {
+		msg, err := subscriber.ReceiveMessage(ctx)
+		if err != nil {
+			panic(err)
+		}
+
+		if err := json.Unmarshal([]byte(msg.Payload), &user); err != nil {
+			panic(err)
+		}
+
+		log.Printf("Received message from %s channel.", msg.Channel)
+		log.Printf("%+v\n", user)
+	}
+```
+
+If you want to run the code, remember follow the instructions here: [Redis example code](https://github.com/jackgris/go-pubsub-example/tree/main/redis)
+
+
+## Sample code in Go how to use Nats Pub/Sub with JetStream
+
+If you want to run the code, remember follow the instructions here: [Nats example code](https://github.com/jackgris/go-pubsub-example/tree/main/nats)
+
+## Beyond Pub/Sub: additional features that can be added to Pub/Sub to provide more functionality, such as authentication and message retrieval
 
 ## Tips for optimizing Pub/Sub performance and scalability in Go-based systems.
 
 
-Notes:
-
-Deep Dive into Pub/Sub Messaging Patterns: Explore the different messaging patterns supported by Pub/Sub, such as point-to-point, publish/subscribe, request/reply, and fan-out, and discuss their use cases and benefits.
-
-Building Real-time Applications with Pub/Sub: Explain how Pub/Sub can be leveraged to create real-time applications, including chat systems, live data streaming, and collaborative platforms, showcasing the advantages of using Pub/Sub for real-time communication.
-
-Event-Driven Microservices with Pub/Sub: Discuss how Pub/Sub can facilitate event-driven microservice architectures, enabling loose coupling, scalability, and asynchronous communication between microservices. Provide examples of using Pub/Sub to build resilient and decoupled microservice ecosystems.
-
-Scalable Data Processing with Pub/Sub and Go: Explore how to harness the power of Pub/Sub and Go to build scalable data processing pipelines. Discuss concepts like data ingestion, message transformation, parallel processing, and integration with data analytics frameworks like Apache Beam.
-
-Pub/Sub as a Message Bus for Service Integration: Describe how Pub/Sub can serve as a message bus for integrating different services and systems within an organization. Discuss the benefits of using Pub/Sub as a central communication layer, enabling seamless integration, decoupling, and extensibility.
-
-Serverless Event Processing with Pub/Sub and Go: Showcase how Pub/Sub and Go can be combined to build serverless architectures that respond to events. Discuss the integration of Pub/Sub with serverless platforms like Google Cloud Functions, AWS Lambda, or Azure Functions, and demonstrate the benefits of event-driven serverless computing.
-
-Fault-Tolerant Messaging with Pub/Sub and Go: Dive into the fault-tolerant features of Pub/Sub and discuss how they can be utilized in Go applications to ensure reliable message delivery. Cover concepts like message durability, retries, dead-letter queues, and handling failure scenarios.
-
-Securing Pub/Sub Communication in Go: Provide guidance on securing Pub/Sub communication in Go applications, including authentication, encryption, access control, and best practices for securing data in transit and at rest.
-
-Monitoring and Performance Optimization in Pub/Sub with Go: Discuss techniques for monitoring the performance and health of Pub/Sub systems in Go, including monitoring message throughput, latency, and subscription lag. Provide insights into optimizing Pub/Sub usage in Go applications for improved efficiency and scalability.
+## Conclusion
